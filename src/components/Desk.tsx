@@ -12,6 +12,8 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { collection, query, where, onSnapshot, doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 
+const hogwartsSunset = new URL("../assets/images/hogwarts_sunset_login_1783855538166.jpg", import.meta.url).href;
+
 export default function Desk() {
   const [theme, setTheme] = useState<MagicalTheme>("candlelight");
   const config = THEME_CONFIGS[theme];
@@ -283,7 +285,7 @@ export default function Desk() {
       >
         {/* Immersive generated Hogwarts Sunset background image with majestic continuous slow-zoom pan */}
         <motion.img
-          src="/src/assets/images/hogwarts_sunset_login_1783855538166.jpg"
+          src={hogwartsSunset}
           alt="Hogwarts Sunset"
           initial={{ scale: 1.15, opacity: 0 }}
           animate={{

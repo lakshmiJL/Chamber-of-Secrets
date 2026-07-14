@@ -5,7 +5,7 @@ import { getFirestore } from "firebase/firestore";
 const firebaseConfig = {
   projectId: "scientific-lambda-v09p9",
   appId: "1:73980637939:web:702fa51495f198afdf7d86",
-  apiKey: "", //add your google api key here
+  apiKey: "AIzaSyCc1gGuPorPE5KRyMpqbThhu02pAGKgESM",
   authDomain: "scientific-lambda-v09p9.firebaseapp.com",
   storageBucket: "scientific-lambda-v09p9.firebasestorage.app",
   messagingSenderId: "73980637939",
