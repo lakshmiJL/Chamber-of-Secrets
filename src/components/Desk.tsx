@@ -93,6 +93,34 @@ export default function Desk() {
     }
   }, []);
 
+  // Function to load local guest data
+  const loadLocalData = (guestId: string) => {
+    try {
+      const savedEntries = localStorage.getItem(`magical_diary_entries_${guestId}`);
+      if (savedEntries) {
+        setEntries(JSON.parse(savedEntries));
+      } else {
+        setEntries([]);
+      }
+
+      const savedLore = localStorage.getItem(`magical_diary_lore_${guestId}`);
+      if (savedLore) {
+        setLoreScrolls(JSON.parse(savedLore));
+      } else {
+        setLoreScrolls([]);
+      }
+
+      const savedSecrets = localStorage.getItem(`magical_diary_secrets_${guestId}`);
+      if (savedSecrets) {
+        setTrackedSecrets(JSON.parse(savedSecrets));
+      } else {
+        setTrackedSecrets([]);
+      }
+    } catch (e) {
+      console.error("Failed to load local guest data:", e);
+    }
+  };
+
   // Listen to Auth State
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
@@ -116,11 +144,42 @@ export default function Desk() {
           console.error("Error fetching user profile:", e);
         }
       } else {
-        setUser(null);
-        setUserProfile(null);
-        setEntries([]);
-        setLoreScrolls([]);
-        setTrackedSecrets([]);
+        // No Firebase user; check if there is an active local guest session
+        const localGuestId = localStorage.getItem("magical_diary_guest_id");
+        const activeGuestSession = localStorage.getItem("magical_diary_guest_active");
+
+        if (localGuestId && activeGuestSession === "true") {
+          const guestUser = {
+            uid: localGuestId,
+            isAnonymous: true,
+            displayName: "Guest Wizard",
+            email: "guest@hogwarts.edu",
+            isLocalOnly: true
+          };
+          setUser(guestUser);
+          
+          const storedProfile = localStorage.getItem(`magical_diary_profile_${localGuestId}`);
+          if (storedProfile) {
+            setUserProfile(JSON.parse(storedProfile));
+          } else {
+            setUserProfile({
+              uid: localGuestId,
+              name: "Guest Wizard",
+              house: "None",
+              wand: "Unknown Wand",
+              bloodStatus: "Unknown",
+              year: "Fifth Year",
+              isLocalOnly: true
+            });
+          }
+          loadLocalData(localGuestId);
+        } else {
+          setUser(null);
+          setUserProfile(null);
+          setEntries([]);
+          setLoreScrolls([]);
+          setTrackedSecrets([]);
+        }
       }
       setLoadingAuth(false);
     });
@@ -130,7 +189,7 @@ export default function Desk() {
 
   // Real-time Firestore subscriptions for active authenticated user
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.isLocalOnly) return;
 
     // Listen to user-specific entries (sorted client-side to avoid index-creation requirements)
     const entriesQuery = query(
@@ -190,6 +249,15 @@ export default function Desk() {
 
   const handleTrackSecret = async (secretText: string) => {
     if (!user || !secretText.trim()) return;
+
+    if (user.isLocalOnly) {
+      if (trackedSecrets.includes(secretText)) return;
+      const updated = [secretText, ...trackedSecrets];
+      setTrackedSecrets(updated);
+      localStorage.setItem(`magical_diary_secrets_${user.uid}`, JSON.stringify(updated));
+      return;
+    }
+
     try {
       if (trackedSecrets.includes(secretText)) return;
       const secretRef = doc(collection(db, "trackedSecrets"));
@@ -206,6 +274,31 @@ export default function Desk() {
 
   const handleAddEntry = async (newEntry: DiaryEntry) => {
     if (!user) return;
+
+    if (user.isLocalOnly) {
+      const entryWithId = {
+        ...newEntry,
+        userId: user.uid,
+        id: "entry_" + Math.random().toString(36).substring(2, 11),
+      };
+      const updated = [entryWithId, ...entries];
+      setEntries(updated);
+      localStorage.setItem(`magical_diary_entries_${user.uid}`, JSON.stringify(updated));
+
+      // Auto detect secret
+      const secretKeywords = [
+        "secret", "hide", "ashamed", "confess", "afraid", "truth", "private", "murder", "stole", "fear", "hate", "lied", "regret", "guilt", "shame", "sorrow", "lonely", "darkness", "forbidden", "power", "chamber", "slytherin", "voldemort", "death", "kill", "blood"
+      ];
+      const normalizedText = newEntry.text.toLowerCase();
+      const isKeywordSecret = secretKeywords.some(keyword => normalizedText.includes(keyword));
+      const isReflectionSecret = ["Secret", "Sorrow", "Loneliness", "Power", "Corruption", "Devotion", "Ambition", "Suspicion"].includes(newEntry.reflection);
+
+      if (isKeywordSecret || isReflectionSecret) {
+        await handleTrackSecret(newEntry.text);
+      }
+      return;
+    }
+
     try {
       const entryRef = doc(collection(db, "entries"));
       await setDoc(entryRef, {
@@ -232,6 +325,19 @@ export default function Desk() {
 
   const handleAddLore = async (newLore: LoreScroll) => {
     if (!user) return;
+
+    if (user.isLocalOnly) {
+      const loreWithId = {
+        ...newLore,
+        userId: user.uid,
+        id: "lore_" + Math.random().toString(36).substring(2, 11),
+      };
+      const updated = [...loreScrolls, loreWithId];
+      setLoreScrolls(updated);
+      localStorage.setItem(`magical_diary_lore_${user.uid}`, JSON.stringify(updated));
+      return;
+    }
+
     try {
       const loreRef = doc(collection(db, "loreScrolls"));
       await setDoc(loreRef, {
@@ -264,7 +370,15 @@ export default function Desk() {
   const handleLogout = async () => {
     audio.playPageTurn();
     setShowIntroScreen(true);
+    localStorage.removeItem("magical_diary_guest_active");
     await signOut(auth);
+    if (user?.isLocalOnly) {
+      setUser(null);
+      setUserProfile(null);
+      setEntries([]);
+      setLoreScrolls([]);
+      setTrackedSecrets([]);
+    }
   };
 
   if (loadingAuth) {

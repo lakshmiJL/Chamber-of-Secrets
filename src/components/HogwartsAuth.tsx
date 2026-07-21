@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db } from "../lib/firebase";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, signInAnonymously } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { Sparkles, Wand, User, AlertCircle, GraduationCap } from "lucide-react";
+import { Sparkles, Wand, User, AlertCircle, GraduationCap, Compass, Copy, ExternalLink, Check } from "lucide-react";
 import { audio } from "../utils/audio";
 
 interface HogwartsAuthProps {
@@ -24,6 +24,8 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isDomainError, setIsDomainError] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const houses = [
     {
@@ -66,6 +68,7 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
     audio.playQuillScratch(200);
 
     try {
+      setIsDomainError(false);
       const provider = new GoogleAuthProvider();
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
@@ -92,8 +95,87 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
         errMsg = "The Floo Network portal popup was blocked by your browser. Please allow popups to enter Hogwarts.";
       } else if (err.code === "auth/popup-closed-by-user") {
         errMsg = "You closed the portal before completing your authentication.";
+      } else if (err.code === "auth/unauthorized-domain" || (err.message && err.message.includes("unauthorized-domain"))) {
+        setIsDomainError(true);
+        errMsg = "Floo Network Unauthorized Domain: The Chamber of Secrets does not yet trust this portal's location.";
       }
       setError(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestSignIn = async () => {
+    setLoading(true);
+    setError("");
+    audio.playQuillScratch(200);
+
+    try {
+      // 1. Attempt Firebase Anonymous Auth first
+      const userCredential = await signInAnonymously(auth);
+      const user = userCredential.user;
+
+      // Check if user has an existing Hogwarts profile in Firestore
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const profilePayload = userDoc.data();
+        onAuthSuccess(user, profilePayload);
+        audio.playChime();
+      } else {
+        // First-time wizard! Trigger sorting ceremony step to gather profile information
+        setName("Guest Wizard");
+        setSortingUser(user);
+        setIsSortingCeremony(true);
+        audio.playPageTurn();
+      }
+    } catch (err: any) {
+      console.warn("Firebase Anonymous Auth failed or is disabled, falling back to Local Magic Parchment Mode:", err);
+      
+      // 2. Fallback to Local Magic Parchment Mode
+      let guestId = localStorage.getItem("magical_diary_guest_id");
+      if (!guestId) {
+        guestId = "guest_" + Math.random().toString(36).substring(2, 11);
+        localStorage.setItem("magical_diary_guest_id", guestId);
+      }
+      
+      const localUser = {
+        uid: guestId,
+        isAnonymous: true,
+        displayName: "Guest Wizard",
+        email: "guest@hogwarts.edu",
+        isLocalOnly: true
+      };
+
+      // Check if we have a locally stored profile
+      const storedProfile = localStorage.getItem(`magical_diary_profile_${guestId}`);
+      if (storedProfile) {
+        try {
+          const profilePayload = JSON.parse(storedProfile);
+          // Sync with Scribe ledger in Journal.tsx
+          localStorage.setItem("magical_diary_scribe_profile", JSON.stringify({
+            name: profilePayload.name,
+            house: profilePayload.house,
+            bloodStatus: profilePayload.bloodStatus,
+            year: profilePayload.year,
+            wand: profilePayload.wand
+          }));
+          localStorage.setItem("magical_diary_guest_active", "true");
+          onAuthSuccess(localUser, profilePayload);
+          audio.playChime();
+        } catch (e) {
+          setName("Guest Wizard");
+          setSortingUser(localUser);
+          setIsSortingCeremony(true);
+          audio.playPageTurn();
+        }
+      } else {
+        setName("Guest Wizard");
+        setSortingUser(localUser);
+        setIsSortingCeremony(true);
+        audio.playPageTurn();
+      }
     } finally {
       setLoading(false);
     }
@@ -119,12 +201,28 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
         wand,
         bloodStatus,
         year,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        isLocalOnly: sortingUser.isLocalOnly || false
       };
 
-      await setDoc(doc(db, "users", sortingUser.uid), profilePayload);
-      onAuthSuccess(sortingUser, profilePayload);
-      audio.playChime();
+      if (sortingUser.isLocalOnly) {
+        localStorage.setItem(`magical_diary_profile_${sortingUser.uid}`, JSON.stringify(profilePayload));
+        // Sync with Scribe ledger in Journal.tsx
+        localStorage.setItem("magical_diary_scribe_profile", JSON.stringify({
+          name: profilePayload.name,
+          house: profilePayload.house,
+          bloodStatus: profilePayload.bloodStatus,
+          year: profilePayload.year,
+          wand: profilePayload.wand
+        }));
+        localStorage.setItem("magical_diary_guest_active", "true");
+        onAuthSuccess(sortingUser, profilePayload);
+        audio.playChime();
+      } else {
+        await setDoc(doc(db, "users", sortingUser.uid), profilePayload);
+        onAuthSuccess(sortingUser, profilePayload);
+        audio.playChime();
+      }
     } catch (err: any) {
       console.error("Sorting Registry Failure:", err);
       setError(err.message || "Failed to register your wizarding profile. Try again.");
@@ -168,9 +266,89 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
 
             {/* Error Display */}
             {error && (
-              <div className="mb-5 p-3 bg-red-950/40 border border-red-900/50 rounded flex items-start gap-2.5 text-xs text-red-200 leading-relaxed italic shadow-inner">
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                <span>{error}</span>
+              <div className="mb-5 p-3 bg-red-950/40 border border-red-900/50 rounded flex flex-col gap-2.5 text-xs text-red-200 leading-relaxed shadow-inner">
+                <div className="flex items-start gap-2.5 italic">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+                
+                {isDomainError && (
+                  <div className="mt-2.5 p-3 bg-stone-950/95 border border-amber-900/40 rounded text-left font-sans text-stone-300 not-italic space-y-3">
+                    <p className="text-amber-400 font-serif font-semibold text-xs uppercase tracking-wider">
+                      ✨ One-Time Developer Setup Needed:
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-stone-300">
+                      Only <strong>you (the developer)</strong> need to authorize your domains in your Firebase Console <strong>once</strong>. Your users and players do NOT need to do any domain setup! Once added, Google Sign-In will work for everyone.
+                    </p>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-stone-400">
+                        <span>Copy your domain list:</span>
+                        {copied ? (
+                          <span className="text-emerald-400 font-medium flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Copied!
+                          </span>
+                        ) : null}
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <code className="bg-stone-900 border border-stone-800 rounded px-2 py-1 text-[10px] text-amber-200/90 font-mono grow break-all select-all">
+                            {window.location.hostname}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.hostname);
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="p-1.5 bg-amber-950/50 hover:bg-amber-900/50 border border-amber-900/40 rounded text-amber-400 hover:text-amber-300 transition-colors shrink-0"
+                            title="Copy Domain"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <code className="bg-stone-900 border border-stone-800 rounded px-2 py-1 text-[10px] text-amber-200/90 font-mono grow break-all select-all">
+                            chamber-of-secrets.ai.studio
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText("chamber-of-secrets.ai.studio");
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="p-1.5 bg-amber-950/50 hover:bg-amber-900/50 border border-amber-900/40 rounded text-amber-400 hover:text-amber-300 transition-colors shrink-0"
+                            title="Copy Domain"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1.5">
+                      <a
+                        href="https://console.firebase.google.com/project/chamber-of-secrets-502502/authentication/settings"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-medium text-[11px] transition-colors w-full justify-center shadow-sm"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Firebase Auth Settings</span>
+                      </a>
+                    </div>
+
+                    <ol className="list-decimal list-inside text-[10px] text-stone-400 space-y-1 pt-1 border-t border-stone-800">
+                      <li>Click the button above to open Firebase.</li>
+                      <li>Go to <strong>Authorized domains</strong>.</li>
+                      <li>Click <strong>Add domain</strong> and add both domains.</li>
+                    </ol>
+                  </div>
+                )}
               </div>
             )}
 
@@ -340,9 +518,90 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-[320px] mb-4 p-2.5 bg-red-950/60 border border-red-800/40 rounded text-center text-xs text-red-200 leading-relaxed font-serif italic shadow-md"
+                className="w-full max-w-[320px] mb-4 p-3 bg-red-950/60 border border-red-800/40 rounded text-xs text-red-200 leading-relaxed font-serif shadow-md flex flex-col gap-2.5"
               >
-                {error}
+                <div className="flex items-start gap-2 text-left italic">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+
+                {isDomainError && (
+                  <div className="p-3 bg-stone-950/95 border border-amber-900/40 rounded text-left font-sans text-stone-300 not-italic space-y-3">
+                    <p className="text-amber-400 font-serif font-semibold text-xs uppercase tracking-wider">
+                      ✨ One-Time Developer Setup Needed:
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-stone-300">
+                      Only <strong>you (the developer)</strong> need to authorize your domains in your Firebase Console <strong>once</strong>. Your users and players do NOT need to do any domain setup! Once added, Google Sign-In will work for everyone.
+                    </p>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-stone-400">
+                        <span>Copy your domain list:</span>
+                        {copied ? (
+                          <span className="text-emerald-400 font-medium flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Copied!
+                          </span>
+                        ) : null}
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <code className="bg-stone-900 border border-stone-800 rounded px-2 py-0.5 text-[10px] text-amber-200/90 font-mono grow break-all select-all">
+                            {window.location.hostname}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.hostname);
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="p-1 bg-amber-950/50 hover:bg-amber-900/50 border border-amber-900/40 rounded text-amber-400 hover:text-amber-300 transition-colors shrink-0"
+                            title="Copy Domain"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <code className="bg-stone-900 border border-stone-800 rounded px-2 py-0.5 text-[10px] text-amber-200/90 font-mono grow break-all select-all">
+                            chamber-of-secrets.ai.studio
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText("chamber-of-secrets.ai.studio");
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="p-1 bg-amber-950/50 hover:bg-amber-900/50 border border-amber-900/40 rounded text-amber-400 hover:text-amber-300 transition-colors shrink-0"
+                            title="Copy Domain"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <a
+                        href="https://console.firebase.google.com/project/chamber-of-secrets-502502/authentication/settings"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-medium text-[10px] transition-colors w-full justify-center shadow-sm uppercase tracking-widest font-mono"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Open Settings</span>
+                      </a>
+                    </div>
+
+                    <ol className="list-decimal list-inside text-[9px] text-stone-400 space-y-1 pt-1.5 border-t border-stone-900">
+                      <li>Open Firebase Console above.</li>
+                      <li>Go to <strong>Authorized domains</strong>.</li>
+                      <li>Click <strong>Add domain</strong> and add both.</li>
+                    </ol>
+                  </div>
+                )}
               </motion.div>
             )}
  
@@ -363,7 +622,7 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
                   borderColor: "#f3c83b",
                 }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full py-3.5 bg-[#d97706] hover:bg-[#cf6d14] text-white font-serif rounded-lg transition-all duration-300 text-sm font-semibold shadow-2xl shadow-black/90 disabled:opacity-50 border border-[#f3c83b]/30 flex items-center justify-center gap-2.5 uppercase tracking-widest relative overflow-hidden group"
+                className="w-full py-3.5 bg-[#d97706] hover:bg-[#cf6d14] text-white font-serif rounded-lg transition-all duration-300 text-sm font-semibold shadow-2xl shadow-black/90 disabled:opacity-50 border border-[#f3c83b]/30 flex items-center justify-center gap-2.5 uppercase tracking-widest relative overflow-hidden group mb-3"
               >
                 {/* Beautiful custom glossy shine sweep that runs infinitely */}
                 <motion.div
@@ -391,9 +650,31 @@ export default function HogwartsAuth({ onAuthSuccess }: HogwartsAuthProps) {
                   </>
                 )}
               </motion.button>
+
+              <div className="flex items-center gap-2 w-full my-1.5 opacity-60 select-none">
+                <div className="h-[1px] bg-stone-800 grow" />
+                <span className="text-[9px] uppercase tracking-widest text-stone-500 font-mono">Or</span>
+                <div className="h-[1px] bg-stone-800 grow" />
+              </div>
+
+              <motion.button
+                type="button"
+                onClick={handleGuestSignIn}
+                disabled={loading}
+                whileHover={{ 
+                  scale: 1.02, 
+                  boxShadow: "0 0 15px rgba(217, 119, 6, 0.25)",
+                  borderColor: "#d97706",
+                }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full py-2.5 bg-stone-950/80 hover:bg-stone-900 text-stone-300 hover:text-amber-100 font-serif rounded-lg transition-all duration-300 text-xs shadow-md disabled:opacity-50 border border-stone-800 hover:border-[#d97706]/40 flex items-center justify-center gap-2 uppercase tracking-widest"
+              >
+                <Compass className="w-3.5 h-3.5 text-stone-500" />
+                <span>Enter as Guest Wizard</span>
+              </motion.button>
               
               <p className="text-[10px] text-stone-400 font-mono tracking-wider text-center mt-5 uppercase max-w-[280px] leading-relaxed opacity-80 select-none">
-                Authenticates via the secure Floo Network to protect your sacred journal entries.
+                Authenticates via the secure Floo Network to protect your sacred journal entries, or use the Guest option for local parchment mode.
               </p>
             </motion.div>
           </motion.div>

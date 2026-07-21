@@ -3,12 +3,12 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  projectId: "scientific-lambda-v09p9",
-  appId: "1:73980637939:web:702fa51495f198afdf7d86",
-  apiKey: "AIzaSyCc1gGuPorPE5KRyMpqbThhu02pAGKgESM",
-  authDomain: "scientific-lambda-v09p9.firebaseapp.com",
-  storageBucket: "scientific-lambda-v09p9.firebasestorage.app",
-  messagingSenderId: "73980637939",
+  projectId: "chamber-of-secrets-502502",
+  appId: "1:795318771666:web:87b277b067d2eac4d2720b",
+  apiKey: "AIzaSyDKjGsFHqNrsmIc_NwLnNmzrq5eBGRKQNI",
+  authDomain: "chamber-of-secrets-502502.firebaseapp.com",
+  storageBucket: "chamber-of-secrets-502502.firebasestorage.app",
+  messagingSenderId: "795318771666",
 };
 
 // Initialize Firebase
@@ -16,4 +16,4 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Services
 export const auth = getAuth(app);
-export const db = getFirestore(app, "ai-studio-tomriddlesdiary-f351b1a6-c0ab-4270-8d62-d1b2b0b3fa6a");
+export const db = getFirestore(app, "ai-studio-chamberofsecrets-f351b1a6-c0ab-4270-8d62-d1b2b0b3fa6a");
