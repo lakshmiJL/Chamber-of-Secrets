@@ -146,6 +146,9 @@ export default function Journal({
     localStorage.setItem("magical_diary_scribe_profile", JSON.stringify(scribeProfile));
   }, [scribeProfile]);
 
+  // Notice for Quill transcription requirements on Netlify
+  const [transcriptionNotice, setTranscriptionNotice] = useState<string | null>(null);
+
   // Current Entry Output (after incanting)
   const [currentResponse, setCurrentResponse] = useState<DiaryEntry | null>(null);
 
@@ -593,10 +596,18 @@ export default function Journal({
       clearCanvas();
 
       try {
-        entryText = await transcribeHandwritingService(base64Image);
+        const transcribed = await transcribeHandwritingService(base64Image);
+        if (!transcribed) {
+          setIsIncanting(false);
+          setTranscriptionNotice("✨ Quill handwriting AI requires VITE_GEMINI_API_KEY on Netlify. Switch to Keystroke mode (⌨️) to type your exact message!");
+          return;
+        }
+        entryText = transcribed;
       } catch (err) {
         console.error("Transcription error:", err);
-        entryText = "I seek Slytherin's secret";
+        setIsIncanting(false);
+        setTranscriptionNotice("✨ Transcription error. Please switch to Keystroke mode (⌨️) to type your message directly.");
+        return;
       }
     } else {
       if (!typedText.trim()) return;
@@ -1192,6 +1203,19 @@ export default function Journal({
                           </button>
                         </div>
                       </div>
+
+                      {/* Notice Banner */}
+                      {transcriptionNotice && (
+                        <div className="p-2 bg-amber-950/10 border border-amber-900/30 rounded text-stone-800 text-[11px] font-sans flex items-center justify-between gap-2 shadow-sm animate-fade-in">
+                          <span>{transcriptionNotice}</span>
+                          <button
+                            onClick={() => setTranscriptionNotice(null)}
+                            className="text-amber-900 hover:text-amber-950 font-bold px-1.5 text-xs font-mono"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
 
                       {/* Slytherin communion backdoor nested beautifully in Scribed Thoughts */}
                       {trackedSecrets.length > 0 && (

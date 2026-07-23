@@ -271,16 +271,8 @@ export async function transcribeHandwritingService(base64Image: string): Promise
     }
   }
 
-  // Smart client fallback when offline or no API key
-  const magicalPhrases = [
-    "I seek Slytherin's secret",
-    "Who are you?",
-    "Tell me your secrets",
-    "Hello Tom",
-    "The Chamber of Secrets",
-    "I need your guidance"
-  ];
-  return magicalPhrases[Math.floor(Math.random() * magicalPhrases.length)];
+  // If no server and no Gemini API key configured
+  return null;
 }
 
 // 2. Chat with Tom Riddle (server first -> client Gemini -> offline engine)
