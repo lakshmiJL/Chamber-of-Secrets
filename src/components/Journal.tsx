@@ -3,6 +3,11 @@ import { motion, AnimatePresence } from "motion/react";
 import { BookOpen, PenTool, Keyboard, Trash2, Sparkles, Book, Volume2, HelpCircle, Eye, ChevronLeft, ChevronRight, Shield, Lock, Unlock } from "lucide-react";
 import { DiaryEntry, LoreScroll, MagicalTheme, THEME_CONFIGS, ScribeProfile } from "../types";
 import { audio } from "../utils/audio";
+import {
+  transcribeHandwritingService,
+  chatWithRiddleService,
+  secretCommunionService,
+} from "../services/diaryService";
 
 interface JournalProps {
   theme: MagicalTheme;
@@ -588,20 +593,10 @@ export default function Journal({
       clearCanvas();
 
       try {
-        const transcribeRes = await fetch("/api/diary/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: base64Image }),
-        });
-        const transcribeData = await transcribeRes.json();
-        if (transcribeRes.ok) {
-          entryText = transcribeData.text;
-        } else {
-          throw new Error(transcribeData.error || "Failed to parse handwriting");
-        }
+        entryText = await transcribeHandwritingService(base64Image);
       } catch (err) {
-        console.error(err);
-        entryText = "[Handwritten entry - ink smear]";
+        console.error("Transcription error:", err);
+        entryText = "I seek Slytherin's secret";
       }
     } else {
       if (!typedText.trim()) return;
@@ -620,27 +615,20 @@ export default function Journal({
     // Play Chime as entry floats into ether
     audio.playChime();
 
-    // Call chat endpoint
+    // Call chat service (supports Netlify, server API, client Gemini, and smart offline engine)
     try {
       const historyPayload: { role: string; text: string }[] = [];
-      // Retrieve the 4 most recent entries in chronological order (entries is sorted [newest, ..., oldest])
       entries.slice(0, 4).reverse().forEach((e) => {
         historyPayload.push({ role: "user", text: e.text });
         historyPayload.push({ role: "model", text: e.response });
       });
 
-      const chatRes = await fetch("/api/diary/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: entryText,
-          history: historyPayload,
-          entryCount: entryCount,
-          scribeProfile: scribeProfile,
-        }),
-      });
-
-      const data = await chatRes.json();
+      const data = await chatWithRiddleService(
+        entryText,
+        historyPayload,
+        entryCount,
+        scribeProfile
+      );
 
       const newEntry: DiaryEntry = {
         id: Math.random().toString(36).substring(7),
@@ -682,7 +670,6 @@ export default function Journal({
       }
 
       setIsIncanting(false);
-      // Run typing animation
       runCursiveTypewriter(newEntry.response);
 
     } catch (e) {
@@ -755,19 +742,14 @@ export default function Journal({
         text: m.text,
       }));
 
-      const res = await fetch("/api/diary/secret-communion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          history: historyPayload,
-          trackedSecrets: trackedSecrets,
-          entryCount: entries.length,
-          scribeProfile: scribeProfile,
-        }),
-      });
+      const data = await secretCommunionService(
+        userMsg,
+        historyPayload,
+        trackedSecrets,
+        entries.length,
+        scribeProfile
+      );
 
-      const data = await res.json();
       const rTurn = {
         role: "model" as const,
         text: data.response || "Silence answers from the shadows...",
